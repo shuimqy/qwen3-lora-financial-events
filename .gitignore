@@ -1,0 +1,33 @@
+# Local environments and downloaded dependencies
+**/.venv/
+**/.python/
+**/.python-bin/
+**/.cache/
+**/.pytest_cache/
+**/.ruff_cache/
+**/__pycache__/
+*.py[cod]
+**/dist/
+**/build/
+
+# Local configuration, credentials and runtime output
+**/.env
+**/.env.*
+!**/.env.example
+**/run/
+**/secrets.json
+**/secrets.toml
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.publish/
+
+# Editor and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

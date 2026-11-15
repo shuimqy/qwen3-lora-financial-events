@@ -1,0 +1,11 @@
+.venv/
+.python/
+.python-bin/
+.cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.env
+run/
+dist/

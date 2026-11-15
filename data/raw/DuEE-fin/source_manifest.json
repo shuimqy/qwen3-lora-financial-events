@@ -1,0 +1,20 @@
+{
+  "source": "hccngu/Viscacha-Chinese-IE/DuEE-fin",
+  "source_url": "https://huggingface.co/datasets/hccngu/Viscacha-Chinese-IE/tree/main/DuEE-fin",
+  "download_method": "User manual download; exact repository revision not independently established; file hashes identify the snapshot.",
+  "format": "JSON arrays with sentence/events/type/arguments/name; source document offsets/ids not retained by mirror.",
+  "files": {
+    "train.json": {
+      "bytes": 20412149,
+      "sha256": "56581fe336873b9b9c8eaba043c7d7878fe3c4625dabe560bddc21c3c9550493"
+    },
+    "dev.json": {
+      "bytes": 3290785,
+      "sha256": "510be65ff13575460fc5a995d0081156ee548a5a02a6d9d488d12feead9df1cd"
+    },
+    "labels.json": {
+      "bytes": 1060,
+      "sha256": "550b47091453037c54d2f4793968129578ad3dcabf98b23b9944e95621656c4f"
+    }
+  }
+}

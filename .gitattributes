@@ -1,0 +1,3 @@
+# Preserve the exact bytes used by the model/data SHA-256 manifests.
+* -text
+*.safetensors filter=lfs diff=lfs merge=lfs -text
