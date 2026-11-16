@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -118,6 +120,7 @@ def test_token_overflow_releases_generation_lock_before_any_generation():
     engine = InferenceEngine(Settings(_env_file=None))
     engine.ready = True
     engine.tokenizer = OversizedTokenizer()
+    engine.generation = SimpleNamespace(max_new_tokens=256)
     with pytest.raises(InputTooLongError) as error:
         engine.extract("公告")
     assert error.value.tokens == 1793

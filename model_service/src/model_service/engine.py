@@ -3,12 +3,14 @@ import json
 import logging
 import threading
 import time
+from contextlib import nullcontext
 from importlib.resources import files
 
 from .config import Settings
 from .protocol import inspect_answer
 
 logger = logging.getLogger(__name__)
+CHAT_SYSTEM_PROMPT = "你是一个乐于助人的助手。请根据对话上下文回答用户的问题。"
 
 
 class BusyError(Exception):
@@ -118,9 +120,70 @@ class InferenceEngine:
             "enable_thinking": False,
             "decoding": "greedy",
             "max_concurrent_generations": 1,
+            "chat": {
+                "endpoint": "/v1/chat",
+                "lora_enabled": True,
+                "default_adapter_mode": "finetuned",
+                "adapter_modes": ["finetuned", "base"],
+                "default_max_new_tokens": 256,
+                "max_new_tokens_limit": 512,
+                "default_temperature": 0.7,
+                "default_top_p": 0.8,
+                "top_k": 20,
+                "history": "client_supplied_messages",
+            },
         }
 
     def extract(self, article: str) -> dict:
+        messages = [
+            {"role": "system", "content": self.task["system_prompt"]},
+            {"role": "user", "content": self.task["user_prefix"] + article},
+        ]
+        result = self._generate(messages, self.generation)
+        parsed = inspect_answer(result["answer"], article)
+        status = "ok" if parsed.error is None else "invalid_output"
+        if result["usage"]["finish_reason"] == "length":
+            status = "length_limit"
+        return {
+            "status": status,
+            "valid_json_schema": parsed.error is None,
+            "events": parsed.events,
+            "raw_output": result["answer"],
+            "validation_error": parsed.error,
+            "warnings": parsed.warnings,
+            "usage": result["usage"],
+        }
+
+    def chat(self, messages: list[dict], max_new_tokens=256, temperature=0.7, top_p=0.8,
+             adapter_mode="finetuned"):
+        from transformers import GenerationConfig
+
+        conversation = list(messages)
+        if conversation[0]["role"] != "system":
+            conversation.insert(0, {"role": "system", "content": CHAT_SYSTEM_PROMPT})
+        options = {
+            "do_sample": temperature > 0,
+            "num_beams": 1,
+            "max_new_tokens": max_new_tokens,
+            "repetition_penalty": 1.0,
+            "eos_token_id": self.task["eos_token_ids"],
+            "pad_token_id": self.tokenizer.pad_token_id if self.tokenizer else 151643,
+            "bos_token_id": self.tokenizer.bos_token_id if self.tokenizer else None,
+            "use_cache": True,
+        }
+        if temperature > 0:
+            options.update(temperature=temperature, top_p=top_p, top_k=20)
+        result = self._generate(conversation, GenerationConfig(**options), adapter_mode)
+        return {
+            "model": self.task["model_name"] if adapter_mode == "finetuned" else "Qwen3-0.6B",
+            "lora_enabled": adapter_mode == "finetuned",
+            "message": {"role": "assistant", "content": result["answer"]},
+            "usage": result["usage"],
+        }
+
+    def _generate(self, messages: list[dict], generation, adapter_mode="finetuned") -> dict:
+        if adapter_mode not in {"finetuned", "base"}:
+            raise ValueError("Unsupported adapter mode")
         if not self.ready:
             raise NotReadyError("Model is not ready")
         if not self._lock.acquire(blocking=False):
@@ -129,14 +192,10 @@ class InferenceEngine:
         try:
             import torch
 
-            messages = [
-                {"role": "system", "content": self.task["system_prompt"]},
-                {"role": "user", "content": self.task["user_prefix"] + article},
-            ]
             tokens = self.tokenizer.apply_chat_template(
                 messages, tokenize=True, add_generation_prompt=True, enable_thinking=False
             )
-            input_limit = self.task["max_sequence_tokens"] - self.task["max_new_tokens"]
+            input_limit = self.task["max_sequence_tokens"] - generation.max_new_tokens
             if len(tokens) > input_limit:
                 raise InputTooLongError(len(tokens), input_limit)
             batch = self.tokenizer.pad(
@@ -145,9 +204,11 @@ class InferenceEngine:
                 return_attention_mask=True,
                 return_tensors="pt",
             )
-            with torch.inference_mode():
+            adapter_context = self.model.disable_adapter() if adapter_mode == "base" else nullcontext()
+            # Switching adapters and generation are both inside the same lock.
+            with adapter_context, torch.inference_mode():
                 generated = self.model.generate(
-                    **batch, generation_config=self.generation, use_model_defaults=False
+                    **batch, generation_config=generation, use_model_defaults=False
                 )
             output = generated[0, batch["input_ids"].shape[1]:].tolist()
             end = next(
@@ -157,17 +218,8 @@ class InferenceEngine:
             if end is not None:
                 output = output[:end + 1]
             answer = self.tokenizer.decode(output, skip_special_tokens=True).strip()
-            parsed = inspect_answer(answer, article)
-            status = "ok" if parsed.error is None else "invalid_output"
-            if end is None:
-                status = "length_limit"
             return {
-                "status": status,
-                "valid_json_schema": parsed.error is None,
-                "events": parsed.events,
-                "raw_output": answer,
-                "validation_error": parsed.error,
-                "warnings": parsed.warnings,
+                "answer": answer,
                 "usage": {
                     "input_tokens": len(tokens),
                     "output_tokens": len(output),

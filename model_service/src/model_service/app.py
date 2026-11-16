@@ -9,7 +9,7 @@ from starlette.concurrency import run_in_threadpool
 from . import __version__
 from .config import Settings
 from .engine import BusyError, InferenceEngine, InputTooLongError, NotReadyError
-from .schemas import ExtractRequest, ExtractResponse
+from .schemas import ChatRequest, ChatResponse, ExtractRequest, ExtractResponse
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +46,10 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
     async def model_info():
         return runtime.info()
 
-    @app.post("/v1/extract", response_model=ExtractResponse, tags=["inference"])
-    async def extract(request: ExtractRequest):
+    async def infer(operation, *args):
         request_id = uuid4().hex
         try:
-            result = await run_in_threadpool(runtime.extract, request.text)
+            result = await run_in_threadpool(operation, *args)
         except InputTooLongError as error:
             return JSONResponse(status_code=422, content={"error": {
                 "code": "input_too_long", "message": str(error),
@@ -71,8 +70,23 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
                 "code": "inference_failed", "message": "模型推理失败，请查看服务日志。",
                 "request_id": request_id,
             }})
-        logger.info("Inference request_id=%s status=%s latency_ms=%s", request_id,
-                    result["status"], result["usage"]["latency_ms"])
+        logger.info("Inference request_id=%s operation=%s status=%s latency_ms=%s", request_id,
+                    operation.__name__, result.get("status", "ok"), result["usage"]["latency_ms"])
         return {"request_id": request_id, **result}
+
+    @app.post("/v1/extract", response_model=ExtractResponse, tags=["inference"])
+    async def extract(request: ExtractRequest):
+        return await infer(runtime.extract, request.text)
+
+    @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
+    async def chat(request: ChatRequest):
+        return await infer(
+            runtime.chat,
+            [message.model_dump() for message in request.messages],
+            request.max_new_tokens,
+            request.temperature,
+            request.top_p,
+            request.adapter_mode,
+        )
 
     return app
